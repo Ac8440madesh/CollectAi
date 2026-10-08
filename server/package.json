@@ -1,0 +1,22 @@
+{
+  "name": "collectai-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CollectAI backend — autonomous accounts-receivable agent team",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
+    "helmet": "^8.0.0",
+    "zod": "^3.24.1"
+  }
+}
