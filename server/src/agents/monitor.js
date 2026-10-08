@@ -5,20 +5,29 @@ import { monitorOutputSchema } from '../schemas/agents.js';
 /**
  * Monitor agent.
  *
- * Mostly deterministic SQL — finds invoices that are overdue or within 3 days
- * of the due date. No LLM call needed; the "intelligence" is in the urgency
- * bucketing. Logs to agent_logs for the audit trail.
+ * Scans invoices that are overdue or within 3 days of the effective due date.
+ *
+ * Guardrails:
+ * 1. Considers coalesce(extended_due_date, due_date) to mute reminders during active extensions.
+ * 2. Mutes reminders for any invoice with an active pending dispute approval (kind = 'dispute_review').
  */
 export async function runMonitor(userId) {
   const result = await query(
     `select i.id as invoice_id, i.invoice_no, c.name as client_name,
             i.amount::float as amount, i.status, i.due_date,
+            coalesce(i.extended_due_date, i.due_date) as effective_due_date,
             (current_date - i.due_date) as days_overdue
      from invoices i
      join clients c on c.id = i.client_id
      where i.user_id = $1
        and i.status in ('pending', 'overdue', 'partial', 'disputed')
-       and i.due_date <= current_date + interval '3 days'
+       and coalesce(i.extended_due_date, i.due_date) <= current_date + interval '3 days'
+       and not exists (
+         select 1 from approvals a
+         where a.invoice_id = i.id
+           and a.status = 'pending'
+           and a.kind = 'dispute_review'
+       )
      order by i.due_date asc`,
     [userId],
   );
@@ -60,11 +69,8 @@ export async function runMonitor(userId) {
 }
 
 // ── Mock for LLM_MODE=mock ───────────────────────────────────────────────────
-// Monitor doesn't call the LLM, but we register a mock so orchestrator
-// integration tests can run uniformly.
+
 registerMock('monitor', (ctx) => {
-  // ctx.flaggedInvoices comes from the real SQL query in mock mode too,
-  // but if needed for unit tests:
   return ctx?.flaggedInvoices ?? {
     flagged_invoices: [
       {

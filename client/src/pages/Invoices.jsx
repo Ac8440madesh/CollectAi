@@ -26,6 +26,8 @@ export default function Invoices() {
   const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(null); // invoice object when open
+  const [timelineModal, setTimelineModal] = useState(null); // invoice timeline data when open
+  const [timelineLoading, setTimelineLoading] = useState(false);
   const [importStatus, setImportStatus] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -124,6 +126,19 @@ export default function Invoices() {
     }
   };
 
+  const openTimeline = async (inv) => {
+    setTimelineLoading(true);
+    setTimelineModal({ invoice: inv, events: [] });
+    try {
+      const res = await api.get(`/dashboard/invoices/${inv.id}/timeline`);
+      setTimelineModal(res.data);
+    } catch (err) {
+      console.error('Failed to load invoice timeline', err);
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   const handleCSVUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -161,7 +176,7 @@ export default function Invoices() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Invoices</h1>
             <p className="text-sm text-slate-500 mt-1">
-              Manage accounts receivable, track payment status, and import invoices.
+              Manage accounts receivable, track payment status, view agent timelines, and import invoices.
             </p>
           </div>
 
@@ -267,7 +282,7 @@ export default function Invoices() {
                     <th className="px-5 py-3 font-semibold text-right">Paid</th>
                     <th className="px-5 py-3 font-semibold">Due Date</th>
                     <th className="px-5 py-3 font-semibold">Status</th>
-                    <th className="px-5 py-3 font-semibold text-right">Action</th>
+                    <th className="px-5 py-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -299,7 +314,13 @@ export default function Invoices() {
                             {inv.status}
                           </span>
                         </td>
-                        <td className="px-5 py-3.5 text-right">
+                        <td className="px-5 py-3.5 text-right space-x-3">
+                          <button
+                            onClick={() => openTimeline(inv)}
+                            className="text-xs font-semibold text-slate-600 hover:text-slate-900 transition"
+                          >
+                            Timeline
+                          </button>
                           {!isSettled && (
                             <button
                               onClick={() => {
@@ -325,6 +346,66 @@ export default function Invoices() {
           )}
         </div>
       </main>
+
+      {/* Timeline Modal */}
+      {timelineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-2xl w-full shadow-2xl max-h-[85vh] flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Invoice #{timelineModal.invoice?.invoice_no} Timeline
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {timelineModal.invoice?.client_name} — Total: {formatCurrency(timelineModal.invoice?.amount || 0)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setTimelineModal(null)}
+                  className="text-slate-400 hover:text-slate-700 text-xl font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-4 overflow-y-auto max-h-[55vh] pr-2 space-y-4">
+                {timelineLoading ? (
+                  <p className="text-center py-8 text-xs text-slate-400">Loading timeline history...</p>
+                ) : timelineModal.events?.length === 0 ? (
+                  <p className="text-center py-8 text-xs text-slate-400">No activity logged for this invoice yet.</p>
+                ) : (
+                  <div className="relative border-l-2 border-indigo-100 ml-4 space-y-6">
+                    {timelineModal.events?.map((ev, idx) => (
+                      <div key={idx} className="relative pl-6">
+                        <span className="absolute -left-2 top-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-indigo-600 shadow-xs" />
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-900">{ev.title}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(ev.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1 whitespace-pre-line bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                          {ev.detail}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setTimelineModal(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Invoice Modal */}
       {showAddModal && (

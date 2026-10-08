@@ -47,6 +47,40 @@ export const createPaymentSchema = z.object({
   reference: z.string().trim().max(100).optional().nullable(),
 });
 
+// ── Policies ─────────────────────────────────────────────────────────────────
+
+export const updatePolicySchema = z.object({
+  max_extension_days: z.coerce.number().int().min(1).max(180).optional(),
+  max_discount_pct: z.coerce.number().min(0).max(100).optional(),
+  min_partial_pct: z.coerce.number().min(0).max(100).optional(),
+  approval_amount_threshold: z.coerce.number().min(0).optional(),
+  dry_run: z.boolean().optional(),
+});
+
+// ── Approvals ────────────────────────────────────────────────────────────────
+
+export const approvalIdParam = z.object({
+  id: z.string().uuid('Invalid approval ID'),
+});
+
+export const decideApprovalSchema = z.object({
+  decision: z.enum(['approve', 'reject', 'edit_and_approve']),
+  edited_subject: z.string().trim().min(3).max(200).optional(),
+  edited_body: z.string().trim().min(10).max(4000).optional(),
+});
+
+// ── Inbound Communications ───────────────────────────────────────────────────
+
+export const inboundMessageSchema = z.object({
+  invoice_id: z.string().uuid('Invalid invoice ID'),
+  client_message: z
+    .string()
+    .trim()
+    .min(1, 'Client message is required')
+    .max(2000, 'Message cannot exceed 2000 characters'),
+  channel: z.enum(['email', 'whatsapp', 'sms']).default('email'),
+});
+
 // ── Query helpers ────────────────────────────────────────────────────────────
 
 export const paginationQuery = z.object({

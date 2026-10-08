@@ -8,6 +8,8 @@ import { analystOutputSchema } from '../schemas/agents.js';
  * Takes the Monitor's flagged invoices, enriches with client payment history
  * and risk scores, then asks the LLM to recommend a priority, tone, timing,
  * and whether to escalate.
+ *
+ * Special Rule: Disputed invoices MUST use tone 'dispute_resolution' (never 'final').
  */
 export async function runAnalyst(userId, monitorOutput) {
   const { flagged_invoices } = monitorOutput;
@@ -43,10 +45,14 @@ You receive overdue/at-risk invoices with client history and risk scores.
 
 For each invoice, recommend:
 - priority (1 = lowest, 5 = highest urgency)
-- tone: "friendly" for first reminder or good history, "firm" for repeat offenders, "final" for critical
+- tone:
+  * "friendly": First polite reminder or client has good payment history.
+  * "firm": Moderately overdue or repeat late payer.
+  * "final": Severely overdue (>60 days) or critical delinquency.
+  * "dispute_resolution": Any invoice marked as 'disputed'. NEVER use a final notice or aggressive tone for a disputed invoice.
 - timing: when to send (e.g. "send now", "wait 2 days", "send Monday morning")
 - reasoning: one-sentence explanation
-- should_escalate: true ONLY if disputed, amount very large, or risk_score > 80
+- should_escalate: true if disputed, amount > approval threshold, or risk_score > 80
 
 Return JSON: { "recommendations": [ { invoice_id, invoice_no, priority, tone, timing, reasoning, should_escalate } ] }`;
 
@@ -88,11 +94,24 @@ registerMock('analyst', (ctx) => {
       let priority = 2;
       const risk = inv.client_score?.risk_score ?? 0;
 
+      // Disputed invoices always receive dispute_resolution tone (never final)
+      if (inv.status === 'disputed') {
+        return {
+          invoice_id: inv.invoice_id,
+          invoice_no: inv.invoice_no,
+          priority: 5,
+          tone: 'dispute_resolution',
+          timing: 'send now',
+          reasoning: `${inv.client_name}: Invoice is disputed. Recommending neutral dispute resolution notice.`,
+          should_escalate: true,
+        };
+      }
+
       if (inv.days_overdue > 30 || risk > 60) {
         tone = 'firm';
         priority = 4;
       }
-      if (inv.days_overdue > 60 || risk > 80 || inv.status === 'disputed') {
+      if (inv.days_overdue > 60 || risk > 80) {
         tone = 'final';
         priority = 5;
       }
@@ -104,7 +123,7 @@ registerMock('analyst', (ctx) => {
         tone,
         timing: inv.days_overdue > 30 ? 'send now' : 'send within 2 days',
         reasoning: `${inv.client_name}: ${inv.days_overdue} days overdue, risk score ${risk}. Recommending ${tone} tone.`,
-        should_escalate: inv.status === 'disputed' || risk > 80,
+        should_escalate: risk > 80,
       };
     }),
   };

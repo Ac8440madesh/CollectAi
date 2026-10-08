@@ -10,6 +10,10 @@ import clientsRouter from './routes/clients.js';
 import invoicesRouter from './routes/invoices.js';
 import paymentsRouter from './routes/payments.js';
 import agentsRouter from './routes/agents.js';
+import policyRouter from './routes/policy.js';
+import approvalsRouter from './routes/approvals.js';
+import communicationsRouter from './routes/communications.js';
+import dashboardRouter from './routes/dashboard.js';
 
 /**
  * Build the Express app.
@@ -20,6 +24,9 @@ import agentsRouter from './routes/agents.js';
  */
 export function createApp() {
   const app = express();
+
+  // Trust reverse proxy header (Render, Vercel, load balancers)
+  app.set('trust proxy', 1);
 
   app.use(helmet());
   app.use(cors({ origin: env.FRONTEND_ORIGIN, credentials: true }));
@@ -43,6 +50,10 @@ export function createApp() {
   app.use('/api/invoices', invoicesRouter);
   app.use('/api/payments', paymentsRouter);
   app.use('/api/agents', agentsRouter);
+  app.use('/api/policy', policyRouter);
+  app.use('/api/approvals', approvalsRouter);
+  app.use('/api/communications', communicationsRouter);
+  app.use('/api/dashboard', dashboardRouter);
 
   // 404 + central error handler (must be last).
   app.use(notFound);

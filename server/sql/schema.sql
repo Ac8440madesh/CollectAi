@@ -36,24 +36,30 @@ create index if not exists idx_clients_user on clients(user_id);
 -- invoices
 -- ---------------------------------------------------------------------------
 create table if not exists invoices (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references users(id) on delete cascade,
-  client_id   uuid not null references clients(id) on delete cascade,
-  invoice_no  text not null,
-  amount      numeric(12,2) not null check (amount >= 0),
-  currency    text not null default 'INR',
-  issue_date  date not null,
-  due_date    date not null,
-  status      text not null default 'pending'
-              check (status in ('pending','overdue','partial','paid','disputed')),
-  paid_amount numeric(12,2) not null default 0 check (paid_amount >= 0),
-  created_at  timestamptz not null default now(),
+  id                uuid primary key default gen_random_uuid(),
+  user_id           uuid not null references users(id) on delete cascade,
+  client_id         uuid not null references clients(id) on delete cascade,
+  invoice_no        text not null,
+  amount            numeric(12,2) not null check (amount >= 0),
+  currency          text not null default 'INR',
+  issue_date        date not null,
+  due_date          date not null,
+  extended_due_date date,
+  promised_pay_by   date,
+  status            text not null default 'pending'
+                    check (status in ('pending','overdue','partial','paid','disputed')),
+  paid_amount       numeric(12,2) not null default 0 check (paid_amount >= 0),
+  created_at        timestamptz not null default now(),
   unique (user_id, invoice_no)
 );
 create index if not exists idx_invoices_user   on invoices(user_id);
 create index if not exists idx_invoices_client on invoices(client_id);
 create index if not exists idx_invoices_status on invoices(status);
 create index if not exists idx_invoices_due    on invoices(due_date);
+
+-- Idempotent Column Migrations (for upgrading existing databases)
+alter table invoices add column if not exists extended_due_date date;
+alter table invoices add column if not exists promised_pay_by date;
 
 -- ---------------------------------------------------------------------------
 -- payments  (against an invoice)
@@ -109,6 +115,7 @@ create table if not exists approvals (
   user_id          uuid not null references users(id) on delete cascade,
   invoice_id       uuid references invoices(id) on delete cascade,
   communication_id uuid references communications(id) on delete set null,
+  kind             text not null default 'escalation',
   reason           text,
   recommendation   text,
   status           text not null default 'pending'
@@ -116,8 +123,19 @@ create table if not exists approvals (
   decided_at       timestamptz,
   created_at       timestamptz not null default now()
 );
+
+-- Idempotent column migrations & backfill for approvals (run before index creation)
+alter table approvals add column if not exists kind text not null default 'escalation';
+update approvals set kind = 'dispute_review' where reason ilike '%dispute%' and kind = 'escalation';
+
 create index if not exists idx_approvals_user   on approvals(user_id);
 create index if not exists idx_approvals_status on approvals(status);
+create index if not exists idx_approvals_kind   on approvals(kind);
+
+-- Partial unique index: only one active pending approval can exist per invoice
+create unique index if not exists idx_approvals_unique_pending_invoice
+  on approvals (invoice_id)
+  where status = 'pending';
 
 -- ---------------------------------------------------------------------------
 -- policies  (one row per user — the owner's guardrails)

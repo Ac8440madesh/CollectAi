@@ -15,7 +15,7 @@ vi.mock('../config/db.js', () => {
 import * as db from '../config/db.js';
 import { createApp } from '../app.js';
 
-const { pool } = db;
+const { query, pool } = db;
 const clientQuery = db.__clientQuery;
 const app = createApp();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -29,6 +29,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   const client = { query: clientQuery, release: vi.fn() };
   pool.connect.mockResolvedValue(client);
+  query.mockResolvedValue({
+    rowCount: 1,
+    rows: [{ id: '11111111-1111-1111-1111-111111111111', invoice_no: 'INV-101', amount: 50000, paid_amount: 50000, client_id: 'c1' }],
+  });
 });
 
 describe('Payments API (/api/payments)', () => {

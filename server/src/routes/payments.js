@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { createPaymentSchema } from '../schemas/resources.js';
+import { runReconciler } from '../agents/reconciler.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -20,6 +21,7 @@ router.use(requireAuth);
  * - If full remaining balance is paid -> status becomes 'paid'.
  * - If partially paid and past due date -> status becomes/remains 'overdue'.
  * - If partially paid and before due date -> status becomes/remains 'partial'.
+ * - Automatically triggers Reconciler agent on payment.
  */
 router.post('/', validate({ body: createPaymentSchema }), async (req, res, next) => {
   const { invoice_id, amount, paid_on, method, reference } = req.body;
@@ -93,9 +95,18 @@ router.post('/', validate({ body: createPaymentSchema }), async (req, res, next)
 
     await db.query('commit');
 
+    // Trigger Reconciler agent
+    const reconciliation = await runReconciler({
+      userId: req.user.id,
+      invoiceId: invoice_id,
+      paymentAmount: amount,
+      newStatus,
+    });
+
     res.status(201).json({
       payment: paymentRes.rows[0],
       invoice: { id: invoice_id, paid_amount: newPaid, status: newStatus },
+      reconciliation,
     });
   } catch (err) {
     await db.query('rollback').catch(() => {});
