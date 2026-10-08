@@ -1,20 +1,31 @@
 import rateLimit from 'express-rate-limit';
+import { isTest } from '../config/env.js';
+
+const envelope = (message) => ({ error: { code: 'RATE_LIMITED', message } });
+
+// Rate limiting is disabled under tests so repeated requests don't flake.
+const skip = () => isTest;
 
 /**
- * General API rate limiter.
- *
- * A stricter limiter for auth routes (login/register) is added in Phase 1.
- * Uses the standard `RateLimit-*` headers and our consistent error envelope.
+ * General API limiter.
  */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // requests per window per IP
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    error: {
-      code: 'RATE_LIMITED',
-      message: 'Too many requests. Please try again in a little while.',
-    },
-  },
+  skip,
+  message: envelope('Too many requests. Please try again in a little while.'),
+});
+
+/**
+ * Stricter limiter for auth routes (login/register) to blunt brute-force.
+ */
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip,
+  message: envelope('Too many attempts. Please wait a few minutes and try again.'),
 });
