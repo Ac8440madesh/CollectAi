@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import Navbar from '../components/Navbar.jsx';
 
-/**
- * Protected landing page (placeholder until the real Dashboard arrives in a
- * later phase). Confirms who is logged in, that the API is reachable, and
- * offers a logout — enough to prove the auth round-trip end to end.
- */
 export default function Home() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [health, setHealth] = useState({ state: 'loading' });
 
   useEffect(() => {
@@ -24,67 +21,75 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-slate-900">CollectAI</span>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-              Phase 1
-            </span>
+      <Navbar />
+
+      <main className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
+        <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-xs">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold uppercase tracking-wider mb-4">
+            Phase 2: Core CRUD & Agents
           </div>
-          <button
-            onClick={logout}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            Log out
-          </button>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Welcome back{user?.name ? `, ${user.name}` : ''} 👋
+          </h1>
+          <p className="mt-2 text-slate-600 max-w-2xl leading-relaxed">
+            CollectAI monitors receivables, prioritizes overdue collections, and coordinates multi-agent follow-up workflows.
+          </p>
+
+          <div className="mt-8 grid gap-5 sm:grid-cols-2">
+            <Link
+              to="/invoices"
+              className="group p-6 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-300 hover:shadow-md transition flex flex-col justify-between"
+            >
+              <div>
+                <div className="text-2xl mb-2">📑</div>
+                <h3 className="font-bold text-slate-900 group-hover:text-indigo-600 transition">
+                  Invoices & Payments
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  View invoice statuses, record partial or full payments, and import new invoices via CSV.
+                </p>
+              </div>
+              <span className="text-xs font-semibold text-indigo-600 mt-4 flex items-center gap-1">
+                Open Invoices →
+              </span>
+            </Link>
+
+            <Link
+              to="/agent-activity"
+              className="group p-6 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-indigo-300 hover:shadow-md transition flex flex-col justify-between"
+            >
+              <div>
+                <div className="text-2xl mb-2">🤖</div>
+                <h3 className="font-bold text-slate-900 group-hover:text-indigo-600 transition">
+                  Agent Activity & Audit Feed
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Trigger the Monitor & Analyst agent pipeline on demand and view the structured decision logs.
+                </p>
+              </div>
+              <span className="text-xs font-semibold text-indigo-600 mt-4 flex items-center gap-1">
+                Run Agents Now →
+              </span>
+            </Link>
+          </div>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-10">
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Welcome{user?.name ? `, ${user.name}` : ''} 👋
-        </h1>
-        <p className="mt-1 text-slate-500">
-          You are signed in{user?.business_name ? ` for ${user.business_name}` : ''}. The dashboard,
-          invoices, and agent activity arrive in the next phases.
-        </p>
-
-        <div className="mt-8 grid gap-4 sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Signed-in user
-            </div>
-            <dl className="mt-2 space-y-1 text-sm text-slate-700">
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">Email</dt>
-                <dd className="truncate">{user?.email ?? '—'}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">Business</dt>
-                <dd className="truncate">{user?.business_name ?? '—'}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Backend API
-            </div>
-            {health.state === 'loading' && <p className="mt-2 text-sm text-slate-600">Checking…</p>}
-            {health.state === 'ok' && (
-              <p className="mt-2 flex items-center gap-2 text-sm font-medium text-emerald-600">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
-                Connected — {health.data.status}
+        {/* Status card */}
+        <div className="mt-6 bg-white rounded-xl border border-slate-200 p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span
+              className={`h-3 w-3 rounded-full ${
+                health.state === 'ok' ? 'bg-emerald-500' : 'bg-amber-500'
+              }`}
+            />
+            <div>
+              <p className="text-xs font-semibold text-slate-900">Backend API Status</p>
+              <p className="text-xs text-slate-500">
+                {health.state === 'ok' ? 'Connected (http://localhost:4000)' : 'Connecting to API...'}
               </p>
-            )}
-            {health.state === 'error' && (
-              <p className="mt-2 flex items-center gap-2 text-sm font-medium text-red-600">
-                <span className="h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
-                Not reachable — {health.message}
-              </p>
-            )}
+            </div>
           </div>
+          <span className="text-xs font-mono text-slate-400">LLM_MODE: mock</span>
         </div>
       </main>
     </div>

@@ -6,6 +6,10 @@ import { env } from './config/env.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
 import authRouter from './routes/auth.js';
+import clientsRouter from './routes/clients.js';
+import invoicesRouter from './routes/invoices.js';
+import paymentsRouter from './routes/payments.js';
+import agentsRouter from './routes/agents.js';
 
 /**
  * Build the Express app.
@@ -35,6 +39,10 @@ export function createApp() {
 
   // Feature routes.
   app.use('/api/auth', authRouter);
+  app.use('/api/clients', clientsRouter);
+  app.use('/api/invoices', invoicesRouter);
+  app.use('/api/payments', paymentsRouter);
+  app.use('/api/agents', agentsRouter);
 
   // 404 + central error handler (must be last).
   app.use(notFound);

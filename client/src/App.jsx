@@ -4,8 +4,9 @@ import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
 import Home from './pages/Home.jsx';
+import Invoices from './pages/Invoices.jsx';
+import AgentActivity from './pages/AgentActivity.jsx';
 
-// Routing grows phase by phase. Phase 1 adds auth + one protected page.
 export default function App() {
   return (
     <AuthProvider>
@@ -17,6 +18,22 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Home />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/invoices"
+          element={
+            <ProtectedRoute>
+              <Invoices />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/agent-activity"
+          element={
+            <ProtectedRoute>
+              <AgentActivity />
             </ProtectedRoute>
           }
         />
