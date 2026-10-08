@@ -12,11 +12,14 @@ router.use(requireAuth);
  * POST /api/payments
  * Records a payment against an invoice.
  *
- * Guardrails:
+ * Guardrails & State Transitions:
  * - Reject non-positive amounts (enforced by Zod schema: positive()).
+ * - Reject payments on disputed invoices (409 INVOICE_DISPUTED).
  * - Reject payments on already fully-paid invoices (400 INVOICE_ALREADY_PAID).
- * - Reject payments exceeding the remaining balance (400 EXCEEDS_BALANCE).
- * - Updates invoice paid_amount and status ('partial' | 'paid') in a single transaction.
+ * - Reject payments exceeding remaining balance (400 EXCEEDS_BALANCE).
+ * - If full remaining balance is paid -> status becomes 'paid'.
+ * - If partially paid and past due date -> status becomes/remains 'overdue'.
+ * - If partially paid and before due date -> status becomes/remains 'partial'.
  */
 router.post('/', validate({ body: createPaymentSchema }), async (req, res, next) => {
   const { invoice_id, amount, paid_on, method, reference } = req.body;
@@ -26,7 +29,11 @@ router.post('/', validate({ body: createPaymentSchema }), async (req, res, next)
 
     // Lock the invoice row and verify ownership.
     const invRes = await db.query(
-      'select id, amount, paid_amount, status from invoices where id = $1 and user_id = $2 for update',
+      `select id, amount, paid_amount, status, due_date,
+              (due_date < current_date) as is_past_due
+       from invoices
+       where id = $1 and user_id = $2
+       for update`,
       [invoice_id, req.user.id],
     );
     if (invRes.rowCount === 0) {
@@ -34,14 +41,25 @@ router.post('/', validate({ body: createPaymentSchema }), async (req, res, next)
     }
     const invoice = invRes.rows[0];
 
+    // 1. Guard against disputed invoices
+    if (invoice.status === 'disputed') {
+      throw new AppError(
+        409,
+        'INVOICE_DISPUTED',
+        'Cannot record payment on a disputed invoice. Please resolve the dispute first.',
+      );
+    }
+
     const totalAmount = parseFloat(invoice.amount);
     const currentPaid = parseFloat(invoice.paid_amount);
     const remainingBalance = Math.round((totalAmount - currentPaid) * 100) / 100;
 
+    // 2. Guard against already-paid invoices
     if (remainingBalance <= 0 || invoice.status === 'paid') {
       throw new AppError(400, 'INVOICE_ALREADY_PAID', 'Invoice is already fully paid');
     }
 
+    // 3. Guard against overpayment exceeding balance
     if (amount > remainingBalance) {
       throw new AppError(
         400,
@@ -59,7 +77,14 @@ router.post('/', validate({ body: createPaymentSchema }), async (req, res, next)
     );
 
     const newPaid = Math.round((currentPaid + amount) * 100) / 100;
-    const newStatus = newPaid >= totalAmount ? 'paid' : 'partial';
+
+    // Determine target status according to state transition rules
+    let newStatus = 'partial';
+    if (newPaid >= totalAmount) {
+      newStatus = 'paid';
+    } else if (invoice.is_past_due) {
+      newStatus = 'overdue';
+    }
 
     await db.query(
       'update invoices set paid_amount = $1, status = $2 where id = $3',

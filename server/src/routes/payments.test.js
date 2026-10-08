@@ -34,13 +34,31 @@ beforeEach(() => {
 describe('Payments API (/api/payments)', () => {
   const invoiceId = '11111111-1111-1111-1111-111111111111';
 
-  it('locks the invoice row with SELECT ... FOR UPDATE inside a transaction to prevent race conditions', async () => {
+  it('rejects malformed non-UUID invoice_id with 400 VALIDATION_ERROR', async () => {
+    const res = await request(app)
+      .post('/api/payments')
+      .set(authHeader('u1'))
+      .send({
+        invoice_id: 'not-a-valid-uuid-12345',
+        amount: 5000,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'invoice_id', message: expect.stringMatching(/invalid invoice id|uuid/i) }),
+      ]),
+    );
+  });
+
+  it('locks the invoice row with SELECT ... FOR UPDATE inside a transaction', async () => {
     let selectQueryText = '';
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select.*from invoices/i.test(text)) {
+      if (/select[\s\S]*from invoices/i.test(text)) {
         selectQueryText = text;
-        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '0', status: 'pending' }] };
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '0', status: 'pending', is_past_due: false }] };
       }
       if (/insert into payments/i.test(text)) {
         return { rowCount: 1, rows: [{ id: 'pay1', invoice_id: invoiceId, amount: 20000, method: 'upi' }] };
@@ -63,11 +81,11 @@ describe('Payments API (/api/payments)', () => {
     expect(selectQueryText.toLowerCase()).toContain('for update');
   });
 
-  it('POST /api/payments records partial payment and updates invoice to "partial"', async () => {
+  it('transitions "pending" (not past due) -> "partial" on first partial payment', async () => {
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select id, amount, paid_amount, status from invoices/i.test(text)) {
-        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '0', status: 'pending' }] };
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '0', status: 'pending', is_past_due: false }] };
       }
       if (/insert into payments/i.test(text)) {
         return { rowCount: 1, rows: [{ id: 'pay1', invoice_id: invoiceId, amount: 20000, method: 'upi' }] };
@@ -92,14 +110,43 @@ describe('Payments API (/api/payments)', () => {
     expect(res.body.invoice.paid_amount).toBe(20000);
   });
 
-  it('POST /api/payments marks invoice as "paid" when full remaining balance is settled', async () => {
+  it('preserves/sets "overdue" status when partial payment is made on a past-due invoice', async () => {
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select id, amount, paid_amount, status from invoices/i.test(text)) {
-        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '20000', status: 'partial' }] };
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '10000', status: 'overdue', is_past_due: true }] };
       }
       if (/insert into payments/i.test(text)) {
-        return { rowCount: 1, rows: [{ id: 'pay2', invoice_id: invoiceId, amount: 30000, method: 'bank' }] };
+        return { rowCount: 1, rows: [{ id: 'pay2', invoice_id: invoiceId, amount: 15000, method: 'bank' }] };
+      }
+      if (/update invoices set paid_amount/i.test(text)) {
+        return { rowCount: 1, rows: [] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set(authHeader('u1'))
+      .send({
+        invoice_id: invoiceId,
+        amount: 15000,
+        method: 'bank',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.invoice.status).toBe('overdue');
+    expect(res.body.invoice.paid_amount).toBe(25000);
+  });
+
+  it('transitions to "paid" when full balance is settled, regardless of prior status', async () => {
+    clientQuery.mockImplementation(async (text) => {
+      if (/begin|commit|rollback/i.test(text)) return {};
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '20000', status: 'overdue', is_past_due: true }] };
+      }
+      if (/insert into payments/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: 'pay3', invoice_id: invoiceId, amount: 30000, method: 'bank' }] };
       }
       if (/update invoices set paid_amount/i.test(text)) {
         return { rowCount: 1, rows: [] };
@@ -121,11 +168,11 @@ describe('Payments API (/api/payments)', () => {
     expect(res.body.invoice.paid_amount).toBe(50000);
   });
 
-  it('POST /api/payments rejects payment larger than remaining balance (400 EXCEEDS_BALANCE)', async () => {
+  it('rejects payments on "disputed" invoices with 409 INVOICE_DISPUTED', async () => {
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select id, amount, paid_amount, status from invoices/i.test(text)) {
-        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '35000', status: 'partial' }] };
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '0', status: 'disputed', is_past_due: false }] };
       }
       return { rows: [] };
     });
@@ -135,19 +182,19 @@ describe('Payments API (/api/payments)', () => {
       .set(authHeader('u1'))
       .send({
         invoice_id: invoiceId,
-        amount: 20000, // Remaining balance is only 15000
+        amount: 10000,
       });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('EXCEEDS_BALANCE');
-    expect(res.body.error.message).toMatch(/exceeds remaining balance/i);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('INVOICE_DISPUTED');
+    expect(res.body.error.message).toMatch(/disputed invoice/i);
   });
 
-  it('POST /api/payments rejects payment on already fully paid invoice (400 INVOICE_ALREADY_PAID)', async () => {
+  it('rejects payments on already fully paid invoices with 400 INVOICE_ALREADY_PAID', async () => {
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select id, amount, paid_amount, status from invoices/i.test(text)) {
-        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '50000', status: 'paid' }] };
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '50000', status: 'paid', is_past_due: false }] };
       }
       return { rows: [] };
     });
@@ -164,7 +211,29 @@ describe('Payments API (/api/payments)', () => {
     expect(res.body.error.code).toBe('INVOICE_ALREADY_PAID');
   });
 
-  it('POST /api/payments rejects negative or zero amount with 400 VALIDATION_ERROR', async () => {
+  it('rejects payment larger than remaining balance with 400 EXCEEDS_BALANCE', async () => {
+    clientQuery.mockImplementation(async (text) => {
+      if (/begin|commit|rollback/i.test(text)) return {};
+      if (/select[\s\S]*from invoices/i.test(text)) {
+        return { rowCount: 1, rows: [{ id: invoiceId, amount: '50000', paid_amount: '35000', status: 'partial', is_past_due: false }] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set(authHeader('u1'))
+      .send({
+        invoice_id: invoiceId,
+        amount: 20000, // Remaining is 15000
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('EXCEEDS_BALANCE');
+    expect(res.body.error.message).toMatch(/exceeds remaining balance/i);
+  });
+
+  it('rejects negative or zero amount with 400 VALIDATION_ERROR', async () => {
     const resNegative = await request(app)
       .post('/api/payments')
       .set(authHeader('u1'))
@@ -188,10 +257,10 @@ describe('Payments API (/api/payments)', () => {
     expect(resZero.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('POST /api/payments returns 404 if invoice does not belong to user', async () => {
+  it('returns 404 if invoice does not belong to user', async () => {
     clientQuery.mockImplementation(async (text) => {
       if (/begin|commit|rollback/i.test(text)) return {};
-      if (/select id, amount, paid_amount, status from invoices/i.test(text)) {
+      if (/select[\s\S]*from invoices/i.test(text)) {
         return { rowCount: 0, rows: [] };
       }
       return { rows: [] };
